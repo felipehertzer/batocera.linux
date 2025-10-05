@@ -1,0 +1,4 @@
+config BR2_PACKAGE_UBOOT_ROCK_4C_PLUS
+    bool "uboot-rock-4c-plus"
+    help
+      U-Boot files for the Radxa Rock 4C Plus
