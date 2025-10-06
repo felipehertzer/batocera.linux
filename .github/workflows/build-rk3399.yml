@@ -1,0 +1,125 @@
+name: Build RK3399
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'package/**'
+      - 'board/**'
+      - 'configs/batocera-rk3399*'
+      - 'buildroot'
+      - '.github/workflows/build-rk3399.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'package/**'
+      - 'board/**'
+      - 'configs/batocera-rk3399*'
+      - 'buildroot'
+  workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Perform clean build'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-rk3399:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 10240
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git make
+
+      - name: Add user to docker group
+        run: |
+          sudo usermod -aG docker $USER
+          newgrp docker
+
+      - name: Cache Docker image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/docker-cache
+          key: ${{ runner.os }}-docker-batocera-${{ hashFiles('docker/**') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-batocera-
+
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: dl
+          key: ${{ runner.os }}-dl-rk3399-${{ hashFiles('configs/batocera-rk3399*') }}
+          restore-keys: |
+            ${{ runner.os }}-dl-rk3399-
+            ${{ runner.os }}-dl-
+
+      - name: Cache build output
+        if: ${{ !inputs.clean_build }}
+        uses: actions/cache@v4
+        with:
+          path: output/rk3399
+          key: ${{ runner.os }}-build-rk3399-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-build-rk3399-
+
+      - name: Build Docker image
+        run: make batocera-docker-image
+
+      - name: Download sources
+        run: make rk3399-source
+        continue-on-error: true
+
+      - name: Build RK3399
+        run: |
+          if [ "${{ inputs.clean_build }}" == "true" ]; then
+            make rk3399-cleanbuild
+          else
+            make rk3399-build
+          fi
+
+      - name: Check build artifacts
+        run: |
+          ls -lh output/images/batocera/images/rk3399/
+          du -sh output/rk3399/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: batocera-rk3399-${{ github.sha }}
+          path: output/images/batocera/images/rk3399/*.img.gz
+          retention-days: 7
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-rk3399-${{ github.sha }}
+          path: |
+            output/rk3399/build/build-time.log
+            output/rk3399/build/*/.stamp_*
+          retention-days: 3
